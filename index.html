@@ -7,9 +7,11 @@
     <!-- Tailwind CSS (CDN) -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- 今後MP3タグの読み書きを実装する際に利用するライブラリのCDN候補 -->
-    <!-- <script src="https://unpkg.com/music-metadata-browser/dist/index.js"></script> -->
-    <!-- <script src="https://unpkg.com/browser-id3-writer"></script> -->
+    <!-- ID3タグ読み込みライブラリ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+
+    <!-- 【修正】 確実に動作する安定版(v4.4.0)の CDN に変更 -->
+    <script src="https://unpkg.com/browser-id3-writer@4.4.0/dist/browser-id3-writer.js"></script>
 
     <style>
         /* Custom scrollbar for file list */
@@ -74,7 +76,7 @@
             <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center shrink-0">
                 <label class="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer select-none">
                     <input type="checkbox" id="chk-select-all" class="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded cursor-pointer">
-                    <span>すべて選択</span>
+                    <span id="select-all-text">すべて選択</span>
                 </label>
             </div>
             
@@ -192,13 +194,14 @@
             files: [], 
             selectedIds: new Set(),
             isMobile: window.innerWidth < 768,
-            mobileView: 'list', // 'list' or 'editor'
+            mobileView: 'list',
         };
 
         const els = {
             fileList: document.getElementById('file-list'),
             emptyState: document.getElementById('empty-state'),
             chkSelectAll: document.getElementById('chk-select-all'),
+            selectAllText: document.getElementById('select-all-text'),
             selectionStatus: document.getElementById('selection-status'),
             mobileEditBtn: document.getElementById('mobile-edit-btn'),
             btnSave: document.getElementById('btn-save'),
@@ -222,6 +225,62 @@
 
         const TEXT_KEYS = Object.keys(els.inputs);
 
+        // === ID3 タグ解析用ヘルパー関数 ===
+        function readTagsFromFile(file) {
+            return new Promise((resolve) => {
+                if (!window.jsmediatags) {
+                    resolve({});
+                    return;
+                }
+                
+                window.jsmediatags.read(file, {
+                    onSuccess: function(tag) {
+                        const tags = tag.tags;
+                        let coverUrl = null;
+                        
+                        if (tags.picture) {
+                            const data = tags.picture.data;
+                            const format = tags.picture.format;
+                            const uint8Array = new Uint8Array(data);
+                            const blob = new Blob([uint8Array], { type: format });
+                            coverUrl = URL.createObjectURL(blob);
+                        }
+                        
+                        let track = '';
+                        let trackTotal = '';
+                        if (tags.track) {
+                            const parts = String(tags.track).split('/');
+                            track = parts[0] || '';
+                            trackTotal = parts[1] || '';
+                        }
+
+                        let disc = '1';
+                        let discTotal = '';
+                        if (tags.TPOS) {
+                            const parts = String(tags.TPOS.data).split('/');
+                            disc = parts[0] || '1';
+                            discTotal = parts[1] || '';
+                        }
+
+                        resolve({
+                            title: tags.title || '',
+                            artist: tags.artist || '',
+                            album: tags.album || '',
+                            track: track,
+                            trackTotal: trackTotal,
+                            disc: disc,
+                            discTotal: discTotal,
+                            cover: coverUrl
+                        });
+                    },
+                    onError: function(error) {
+                        console.warn('Tag reading error for', file.name, error);
+                        resolve({});
+                    }
+                });
+            });
+        }
+
         // === 2. File System Access API (Open & Save) ===
         async function openFolder() {
             if (!('showDirectoryPicker' in window)) {
@@ -231,25 +290,48 @@
             }
             try {
                 const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-                const newFiles = [];
+                els.selectAllText.textContent = dirHandle.name;
+
+                els.emptyState.innerHTML = `<p class="text-gray-500 animate-pulse">ファイルを解析中...</p>`;
+                
+                const filePromises = [];
                 for await (const entry of dirHandle.values()) {
                     if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.mp3')) {
-                        const file = await entry.getFile();
-                        const defaultTitle = entry.name.replace('.mp3', '');
-                        const tags = { title: defaultTitle, artist: '', album: '', track: '', trackTotal: '', disc: '1', discTotal: '', cover: null };
-                        newFiles.push({ id: entry.name, handle: entry, file: file, tags: { ...tags }, originalTags: { ...tags } });
+                        filePromises.push((async () => {
+                            const file = await entry.getFile();
+                            const extractedTags = await readTagsFromFile(file);
+                            const defaultTitle = entry.name.replace('.mp3', '');
+                            const tags = { 
+                                title: extractedTags.title || defaultTitle, 
+                                artist: extractedTags.artist || '', 
+                                album: extractedTags.album || '', 
+                                track: extractedTags.track || '', 
+                                trackTotal: extractedTags.trackTotal || '', 
+                                disc: extractedTags.disc || '1', 
+                                discTotal: extractedTags.discTotal || '', 
+                                cover: extractedTags.cover || null 
+                            };
+                            return { id: entry.name, handle: entry, file: file, tags: { ...tags }, originalTags: { ...tags } };
+                        })());
                     }
                 }
+                
+                const newFiles = await Promise.all(filePromises);
+                newFiles.sort((a, b) => a.id.localeCompare(b.id));
+
                 state.files = newFiles;
                 state.selectedIds.clear();
                 if (state.isMobile) switchMobileView('list');
                 renderAll();
+                
             } catch (error) {
                 if (error.name !== 'AbortError') console.error(error);
+                renderAll();
             }
         }
 
         function loadDummyData() {
+            els.selectAllText.textContent = "Dummy Folder";
             const createDummy = (id, title, artist) => ({
                 id, handle: null, file: null,
                 tags: { title, artist, album: 'Album X', track: '', trackTotal: '', disc: '1', discTotal: '', cover: null },
@@ -265,26 +347,94 @@
             renderAll();
         }
 
+        // === 【Phase 1追加】保存処理（ID3の書き込み） ===
         async function saveChanges() {
             if (state.selectedIds.size === 0) return;
+            
+            if (typeof ID3Writer === 'undefined') {
+                alert('ID3ライブラリの読み込みに失敗しました。インターネット接続を確認してください。');
+                return;
+            }
+
+            // 保存中のUI表示（ボタンのスピナー化）
+            const originalBtnHTML = els.btnSave.innerHTML;
+            els.btnSave.disabled = true;
+            els.btnSave.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> 保存中...`;
+
             try {
                 let savedCount = 0;
                 for (const id of state.selectedIds) {
                     const target = state.files.find(f => f.id === id);
-                    if (!target || !target.handle) continue;
+                    if (!target || !target.handle) continue; // ダミーファイルはスキップ
+
+                    // 1. 元のMP3ファイルをArrayBufferとして読み込み
+                    const originalBuffer = await target.file.arrayBuffer();
+
+                    // 2. ID3Writerの初期化 (クラス名修正)
+                    const writer = new ID3Writer(originalBuffer);
+
+                    const tags = target.tags;
+
+                    // 3. 各タグの書き込み
+                    if (tags.title) writer.setFrame('TIT2', tags.title);
+                    if (tags.artist) writer.setFrame('TPE1', [tags.artist]); // 配列で指定
+                    if (tags.album) writer.setFrame('TALB', tags.album);
                     
-                    // TODO: Here you would use browser-id3-writer to modify the binary
+                    // トラック番号・ディスク番号の組み立て (例: "1/12")
+                    let trackStr = tags.track || '';
+                    if (tags.trackTotal) trackStr += '/' + tags.trackTotal;
+                    if (trackStr) writer.setFrame('TRCK', trackStr);
+
+                    let discStr = tags.disc || '';
+                    if (tags.discTotal) discStr += '/' + tags.discTotal;
+                    if (discStr) writer.setFrame('TPOS', discStr);
+
+                    // 4. カバーアート（画像）の処理
+                    if (tags.cover) {
+                        try {
+                            // blob:URL 等から実体データを再取得してArrayBuffer化
+                            const response = await fetch(tags.cover);
+                            const blob = await response.blob();
+                            const coverBuffer = await blob.arrayBuffer();
+                            
+                            // 簡易的なMIMEタイプの判定
+                            let mimeType = 'image/jpeg';
+                            if (blob.type === 'image/png') mimeType = 'image/png';
+                            
+                            writer.setFrame('APIC', {
+                                type: 3, // 3 = Cover (front)
+                                data: coverBuffer,
+                                description: 'Cover',
+                                mimeType: mimeType
+                            });
+                        } catch (e) {
+                            console.warn('Failed to load cover art for', id, e);
+                        }
+                    }
+
+                    // 5. タグを付与して新しいバッファを生成
+                    writer.addTag();
+                    const taggedBuffer = writer.arrayBuffer;
+
+                    // 6. File System Access API を使って元のファイルに直接上書き保存
                     const writable = await target.handle.createWritable();
-                    await writable.write(target.file); 
+                    await writable.write(taggedBuffer);
                     await writable.close();
                     
-                    target.originalTags = { ...target.tags }; // Update baseline
+                    // 7. 保存後の状態を「元の状態」として更新
+                    target.originalTags = { ...target.tags };
+                    target.file = await target.handle.getFile(); // 次回保存用
                     savedCount++;
                 }
-                showToast(`${savedCount > 0 ? savedCount : state.selectedIds.size} 件のファイルに保存しました`);
+
+                showToast(`${savedCount} 件のファイルにタグを保存しました`);
             } catch (error) {
                 console.error(error);
-                alert('保存に失敗しました。');
+                alert('保存に失敗しました。ファイルが他のアプリで開かれているか、権限がありません。');
+            } finally {
+                // UIを元に戻す
+                els.btnSave.disabled = false;
+                els.btnSave.innerHTML = originalBtnHTML;
             }
         }
 
@@ -294,7 +444,7 @@
                     if (state.selectedIds.has(f.id)) f.tags = { ...f.originalTags };
                 });
                 renderEditor();
-                renderList(); // Update artist name in list if changed
+                renderList();
             }
         }
 
@@ -362,13 +512,12 @@
         function renderList() {
             if (state.files.length === 0) {
                 els.emptyState.style.display = 'flex';
-                // Remove all other children
                 Array.from(els.fileList.children).forEach(c => { if(c !== els.emptyState) c.remove(); });
+                els.selectAllText.textContent = "すべて選択";
                 return;
             }
             
             els.emptyState.style.display = 'none';
-            // Keep empty state, remove others to rebuild
             Array.from(els.fileList.children).forEach(c => { if(c !== els.emptyState) c.remove(); });
 
             state.files.forEach(f => {
@@ -387,15 +536,16 @@
                         <input type="checkbox" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded cursor-pointer" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation();">
                     </div>
                     ${coverHtml}
-                    <div class="overflow-hidden">
+                    <div class="overflow-hidden w-full">
                         <div class="font-medium text-sm truncate text-gray-800">${f.tags.title || f.id}</div>
-                        <div class="text-xs text-gray-500 truncate">${f.tags.artist || 'Unknown Artist'}</div>
+                        <div class="text-xs text-gray-500 truncate flex justify-between">
+                            <span>${f.tags.artist || 'Unknown Artist'}</span>
+                            ${f.originalTags.title !== f.tags.title || f.originalTags.artist !== f.tags.artist || f.originalTags.album !== f.tags.album || f.originalTags.cover !== f.tags.cover ? '<span class="text-blue-500 font-bold">*</span>' : ''}
+                        </div>
                     </div>
                 `;
                 
-                // Add event listener to checkbox directly to ensure it toggles correctly
                 div.querySelector('input[type="checkbox"]').onchange = (e) => toggleSelection(f.id);
-                
                 els.fileList.appendChild(div);
             });
 
@@ -415,7 +565,7 @@
 
             els.titleDisplay.textContent = count === 1 ? Array.from(state.selectedIds)[0] : `${count} 件のファイルを編集`;
 
-            // Text Inputs (Only update if not currently focused to prevent cursor jumping)
+            // Text Inputs
             TEXT_KEYS.forEach(key => {
                 const input = els.inputs[key];
                 if (document.activeElement !== input) {
@@ -476,16 +626,13 @@
             renderAll();
         });
 
-        // Mobile Nav
         els.mobileEditBtn.addEventListener('click', () => switchMobileView('editor'));
         document.getElementById('header-back-btn').addEventListener('click', () => switchMobileView('list'));
 
-        // Form Inputs
         TEXT_KEYS.forEach(key => {
             els.inputs[key].addEventListener('input', (e) => updateTagValue(key, e.target.value));
         });
 
-        // Image Handling
         document.getElementById('cover-input').addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) updateTagValue('cover', URL.createObjectURL(file));
@@ -493,7 +640,6 @@
         });
         els.btnClearCover.addEventListener('click', () => updateTagValue('cover', null));
 
-        // Resize Logic (PC)
         const resizer = document.getElementById('resizer');
         const sidebar = document.getElementById('sidebar-list');
         let isResizing = false;
@@ -528,9 +674,7 @@
             }
         });
 
-        // Init
         renderAll();
-
     </script>
 </body>
 </html>
