@@ -1,697 +1,733 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MP3 Tag Editor</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- MP3 Tag Reading Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
-    <!-- MP3 Tag Writing Library (v4.4.0 Stable) -->
-    <script src="https://unpkg.com/browser-id3-writer@4.4.0/dist/browser-id3-writer.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MP3 Tag Editor</title>
+  
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
+  <!-- PWA用: マニフェストファイルの読み込み -->
+  <link rel="manifest" href="manifest.json">
 
-    <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <!-- PWA用: マニフェストファイルの読み込み -->
-    <link rel="manifest" href="manifest.json">
-    
-    <style>
-        /* Custom scrollbar for file list */
-        .file-list-container::-webkit-scrollbar { width: 8px; }
-        .file-list-container::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
-        .file-list-container::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .file-list-container::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
-        /* Highlight selected items */
-        .selected-file { background-color: #eff6ff; border-color: #3b82f6; }
-        
-        /* Loading Overlay */
-        #loading-overlay { backdrop-filter: blur(2px); }
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
 
-        /* Mobile View Navigation */
-        @media (max-width: 767px) {
-            body.mobile-view-list #main-editor { display: none !important; }
-            body.mobile-view-list #header-back-btn { display: none !important; }
-            body.mobile-view-list #header-actions { display: none !important; }
-            body.mobile-view-list #folder-input-wrapper { display: flex !important; width: 100%; }
-            body.mobile-view-list #mobile-edit-fab { display: flex !important; }
-            
-            body.mobile-view-editor #sidebar-list { display: none !important; }
-            body.mobile-view-editor #header-back-btn { display: flex !important; }
-            body.mobile-view-editor #mobile-edit-fab { display: none !important; }
-            body.mobile-view-editor #folder-input-wrapper { display: none !important; }
-            body.mobile-view-editor #header-actions { display: flex !important; width: 100%; justify-content: flex-end; }
-        }
-    </style>
+  <!-- jsmediatags: 既存タグの読み込み用 (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+
+  <!-- browser-id3-writer: タグの書き込み用 (安定版CDN) -->
+  <script src="https://unpkg.com/browser-id3-writer@4.4.0/dist/browser-id3-writer.js"></script>
+
+  <style>
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    
+    .selected-file { background-color: #eff6ff; border-color: #3b82f6; }
+
+    /* Mobile View Switch */
+    @media (max-width: 767px) {
+        body.mobile-view-list #main-editor { display: none; }
+        body.mobile-view-list #header-back-btn { display: none; }
+        body.mobile-view-list #btn-save, body.mobile-view-list #btn-discard { display: none; }
+        
+        body.mobile-view-editor #sidebar-list { display: none; }
+        body.mobile-view-editor #header-back-btn { display: flex; }
+        body.mobile-view-editor #btn-open-folder { display: none; }
+    }
+  </style>
 </head>
-<body class="bg-gray-50 text-gray-800 font-sans min-h-screen md:h-screen flex flex-col mobile-view-list overflow-hidden">
 
-    <header class="bg-white shadow-sm border-b px-4 md:px-6 py-4 flex justify-between items-center shrink-0 relative z-20">
-        <div class="flex items-center gap-3">
-            <button id="header-back-btn" onclick="switchMobileView('list')" class="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-600 md:hidden hidden">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-            </button>
-            <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-                <span class="hidden sm:inline">MP3 Tag Editor</span>
-            </h1>
-        </div>
-        
-        <div class="flex items-center gap-2" id="header-controls">
-            <div id="folder-input-wrapper" class="flex">
-                <button onclick="handleOpenFolder()" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-4 py-2 rounded-md font-medium text-sm transition-colors flex items-center gap-2 border border-blue-200 w-full justify-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                    <span>フォルダを開く</span>
-                </button>
-            </div>
-            
-            <div id="header-actions" class="flex gap-2 hidden md:flex">
-                <button id="btn-discard" onclick="discardChanges()" class="bg-white hover:bg-gray-50 text-gray-600 px-4 py-2 rounded-md font-medium text-sm transition-colors border border-gray-300 disabled:opacity-50" disabled>
-                    破棄
-                </button>
-                <button id="btn-save" onclick="saveChanges()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium text-sm transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50" disabled>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-                    保存
-                </button>
-            </div>
-        </div>
-    </header>
+<body class="bg-gray-50 text-gray-800 font-sans h-[100dvh] flex flex-col mobile-view-list overflow-hidden select-none">
 
-    <main class="flex-1 overflow-hidden flex flex-col md:flex-row relative z-10">
-        
-        <!-- Sidebar: File List -->
-        <aside id="sidebar-list" class="w-full md:w-1/4 bg-white flex flex-col md:h-full shrink-0 border-b md:border-b-0 md:border-r relative">
-            <div class="px-4 py-3 border-b bg-gray-50 flex justify-between items-center shrink-0">
-                <label class="flex items-center gap-2 cursor-pointer text-sm font-medium text-gray-700 w-full truncate">
-                    <input type="checkbox" id="chk-select-all" onchange="toggleSelectAll(this)" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded cursor-pointer shrink-0">
-                    <span id="folder-name-display" class="truncate select-none">ファイルを選択してください</span>
-                </label>
-            </div>
-            
-            <div id="file-list" class="flex-1 overflow-y-auto p-2 file-list-container space-y-1 pb-20 md:pb-2">
-                <!-- Initial Empty State -->
-                <div class="h-full flex flex-col items-center justify-center text-gray-400 p-4 text-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-4 opacity-50"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-                    <p class="text-sm">右上の「フォルダを開く」から<br>MP3ファイルを読み込んでください</p>
-                </div>
-            </div>
+  <!-- ブロック画面 (未対応ブラウザ用) -->
+  <div id="unsupported-screen" class="hidden fixed inset-0 z-50 bg-white flex flex-col items-center justify-center p-6 text-center">
+    <i data-lucide="alert-triangle" class="w-16 h-16 text-red-500 mb-4"></i>
+    <h1 class="text-2xl font-bold text-gray-800 mb-2">ブラウザが対応していません</h1>
+    <p class="text-gray-600 mb-6 max-w-md">
+      申し訳ありません。このアプリは「File System Access API」を使用するため、<br>
+      <strong>PC版の Google Chrome または Microsoft Edge</strong> で動作します。
+    </p>
+  </div>
 
-            <!-- Mobile Status/Action Bar -->
-            <div id="selection-status" class="p-3 bg-gray-50 border-t text-sm text-gray-500 text-center transition-colors absolute md:static bottom-0 left-0 right-0 z-20">
-                <span id="status-text" class="hidden md:block font-medium">ファイルが選択されていません</span>
-                <button onclick="switchMobileView('editor')" id="mobile-edit-btn" class="w-full bg-gray-400 text-white px-4 py-3 rounded-lg font-medium text-base shadow-sm flex md:hidden items-center justify-center gap-2 transition-colors opacity-50 cursor-not-allowed" disabled>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
-                    選択項目を編集する
-                </button>
-            </div>
-        </aside>
+  <!-- ===== Header ===== -->
+  <header class="bg-white shadow-sm border-b px-4 md:px-6 py-4 flex flex-col sm:flex-row justify-between items-center shrink-0 gap-4 sm:gap-0 relative z-20">
+    <div class="flex items-center w-full sm:w-auto justify-center sm:justify-start relative">
+      <button id="header-back-btn" class="absolute left-0 p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-600 md:hidden flex items-center justify-center">
+        <i data-lucide="arrow-left" class="w-6 h-6"></i>
+      </button>
+      <h1 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+        MP3 Tag Editor
+      </h1>
+    </div>
+    <div class="flex flex-wrap justify-center gap-2 sm:gap-3 w-full sm:w-auto">
+      <button id="btn-open-folder" class="bg-blue-50 hover:bg-blue-100 text-blue-600 px-3 sm:px-4 py-2 rounded-md font-medium text-sm transition-colors flex items-center gap-2 border border-blue-200 flex-1 sm:flex-none justify-center">
+        <i data-lucide="folder-open" class="w-4 h-4"></i>
+        <span class="hidden sm:inline">フォルダを開く</span>
+        <span class="sm:hidden">開く</span>
+      </button>
+      <div class="flex flex-wrap justify-center gap-2 sm:gap-3 w-full sm:w-auto mt-4 sm:mt-0" id="header-actions">
+        <button id="btn-discard" class="bg-white hover:bg-gray-50 text-gray-600 px-3 sm:px-4 py-2 rounded-md font-medium text-sm transition-colors border border-gray-300 flex-1 sm:flex-none justify-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+          破棄
+        </button>
+        <button id="btn-save" class="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-md font-medium text-sm transition-colors flex items-center gap-2 shadow-sm flex-1 sm:flex-none justify-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+          保存
+        </button>
+      </div>
+    </div>
+  </header>
 
-        <!-- Resizer (PC Only) -->
-        <div id="resizer" class="hidden md:flex w-1 bg-gray-200 cursor-col-resize hover:bg-blue-400 active:bg-blue-500 transition-colors shrink-0 items-center justify-center select-none group">
-            <div class="w-0.5 h-10 bg-gray-400 rounded-full pointer-events-none group-hover:bg-white group-active:bg-white"></div>
-        </div>
-
-        <!-- Main Area: Editor -->
-        <div id="main-editor" class="flex-1 flex flex-col h-full overflow-hidden bg-gray-50">
-            <div id="editor-content" class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10 opacity-50 pointer-events-none transition-opacity">
-                <div class="max-w-2xl mx-auto bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                    
-                    <!-- Cover Art Section -->
-                    <div class="mb-8">
-                        <label class="block text-sm font-medium text-gray-700 mb-3">カバーアート</label>
-                        <div class="flex flex-col sm:flex-row items-center sm:items-start gap-6">
-                            <div class="w-40 h-40 sm:w-48 sm:h-48 bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg flex flex-col items-center justify-center overflow-hidden relative group shrink-0 cursor-pointer hover:bg-gray-200 transition-colors" onclick="document.getElementById('cover-input').click()">
-                                <img src="" alt="Cover Art" class="w-full h-full object-cover hidden" id="cover-image-preview">
-                                <div id="cover-placeholder" class="text-gray-400 flex flex-col items-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                                    <span class="text-xs font-medium" id="cover-placeholder-text">画像を変更</span>
-                                </div>
-                                <div class="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <span class="text-white text-sm font-bold">画像を変更</span>
-                                </div>
-                                <input type="file" id="cover-input" accept="image/*" class="hidden" onchange="handleImageChange(event)">
-                            </div>
-                            
-                            <div class="flex flex-col gap-3 pt-2 w-full text-center sm:text-left">
-                                <h2 class="text-lg font-bold text-gray-800 mb-1" id="editor-header-title">ファイルを選択してください</h2>
-                                <button onclick="clearCoverImage()" class="text-sm bg-white border border-gray-300 px-4 py-2 rounded-md hover:bg-gray-50 text-gray-700 transition-colors shadow-sm w-fit mx-auto sm:mx-0 flex items-center gap-2">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                                    画像をクリア
-                                </button>
-                                <div class="mt-2 text-sm text-gray-600 bg-blue-50 border border-blue-100 p-3 rounded-md text-left">
-                                    <ul class="list-disc pl-4 space-y-1 text-xs">
-                                        <li>画像枠をクリックしてカバー画像(JPEG/PNG)を設定します。</li>
-                                        <li>自動で最大800pxにリサイズ・圧縮され、軽量に保存されます。</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Text Inputs -->
-                    <div class="space-y-4 pt-6 border-t border-gray-100">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">タイトル</label>
-                            <input type="text" id="input-title" oninput="handleTagChange('title', this.value)" class="w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">アーティスト</label>
-                            <input type="text" id="input-artist" oninput="handleTagChange('artist', this.value)" class="w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">アルバム</label>
-                            <input type="text" id="input-album" oninput="handleTagChange('album', this.value)" class="w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">トラック番号</label>
-                                <div class="flex items-center gap-2">
-                                    <input type="text" id="input-track" oninput="handleTagChange('track', this.value)" class="w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center">
-                                    <span class="text-gray-400">/</span>
-                                    <input type="text" id="input-trackTotal" oninput="handleTagChange('trackTotal', this.value)" class="w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center" placeholder="総数">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">ディスク番号</label>
-                                <div class="flex items-center gap-2">
-                                    <input type="text" id="input-disk" oninput="handleTagChange('disk', this.value)" class="w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center">
-                                    <span class="text-gray-400">/</span>
-                                    <input type="text" id="input-diskTotal" oninput="handleTagChange('diskTotal', this.value)" class="w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center" placeholder="総数">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </main>
-
-    <!-- Loading Overlay for Saves -->
-    <div id="loading-overlay" class="fixed inset-0 bg-white/70 z-50 flex flex-col items-center justify-center hidden">
-        <svg class="animate-spin -ml-1 mr-3 h-10 w-10 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <h2 class="text-xl font-bold text-gray-800" id="loading-text">ファイルを保存中...</h2>
-        <p class="text-gray-500 mt-2 text-sm">画面を閉じないでください</p>
+  <!-- ===== Main Area ===== -->
+  <main class="flex-1 flex flex-col md:flex-row relative min-h-0 overflow-hidden">
+    
+    <!-- ===== Sidebar (List) ===== -->
+    <aside id="sidebar-list" class="w-full md:w-1/4 bg-white flex flex-col h-full min-h-0 border-b md:border-b-0 md:border-r relative z-10 shrink-0">
+      
+      <!-- Toolbar -->
+      <div id="list-toolbar" class="hidden flex items-center justify-between px-4 py-3 border-b bg-gray-50 shrink-0">
+      <label class="flex items-center gap-2 cursor-pointer shrink-0 mr-2">
+        <input type="checkbox" id="chk-select-all" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded cursor-pointer">
+        <span class="text-xs text-gray-500 font-medium">すべて選択</span>
+      </label>
+      <div class="flex items-center gap-2 overflow-hidden justify-end">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-400 shrink-0"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+        <span id="folder-name-display" class="text-sm font-bold text-gray-700 truncate text-right">フォルダ名</span>
+      </div>
     </div>
 
-    <script>
-        // === State Management ===
-        const state = {
-            folderName: '',
-            files: [], // Array of { id, handle, file, originalTags: {}, currentTags: {}, isDirty: boolean }
-            selectedIds: new Set(),
-            originalTagsBackup: {} // Used for reverting changes
-        };
+      <!-- File List -->
+      <div class="flex-1 overflow-y-auto p-3 min-h-0" id="file-list-container">
+        <div id="empty-state" class="flex flex-col items-center justify-center h-full text-gray-400 p-4 text-center">
+          <i data-lucide="audio-lines" class="w-12 h-12 mb-4 opacity-30"></i>
+          <p class="text-sm leading-relaxed">右上の「フォルダを開く」から<br>MP3ファイルを読み込んでください</p>
+        </div>
+        <!-- JS Injected List -->
+      </div>
 
-        // UI Elements Cache
-        const els = {
-            fileList: document.getElementById('file-list'),
-            folderNameDisplay: document.getElementById('folder-name-display'),
-            chkSelectAll: document.getElementById('chk-select-all'),
-            statusText: document.getElementById('status-text'),
-            mobileEditBtn: document.getElementById('mobile-edit-btn'),
-            btnSave: document.getElementById('btn-save'),
-            btnDiscard: document.getElementById('btn-discard'),
-            editorContent: document.getElementById('editor-content'),
-            editorHeaderTitle: document.getElementById('editor-header-title'),
-            inputs: {
-                title: document.getElementById('input-title'),
-                artist: document.getElementById('input-artist'),
-                album: document.getElementById('input-album'),
-                track: document.getElementById('input-track'),
-                trackTotal: document.getElementById('input-trackTotal'),
-                disk: document.getElementById('input-disk'),
-                diskTotal: document.getElementById('input-diskTotal')
+      <!-- Status Bar (Mobile Edit Button) -->
+      <div id="selection-status" class="p-3 bg-gray-50 border-t text-sm text-gray-500 text-center transition-colors shrink-0">
+        <div id="status-text" class="mb-2 hidden md:block">ファイルが選択されていません</div>
+        <button id="mobile-edit-btn" class="md:hidden w-full bg-gray-400 text-white px-4 py-3 rounded-lg font-medium text-base shadow-sm flex items-center justify-center gap-2 transition-colors opacity-50 cursor-not-allowed" disabled>
+          選択項目を編集する
+        </button>
+      </div>
+    </aside>
+
+    <!-- ===== Resizer (PC) ===== -->
+    <div id="resizer" class="hidden md:flex w-1 bg-gray-200 cursor-col-resize hover:bg-blue-400 active:bg-blue-500 transition-colors shrink-0 z-10 items-center justify-center group">
+      <div class="w-0.5 h-10 bg-gray-400 rounded-full pointer-events-none group-hover:bg-white group-active:bg-white"></div>
+    </div>
+
+    <!-- ===== Main Editor ===== -->
+    <div id="main-editor" class="flex-1 bg-white flex flex-col h-full min-h-0 relative">
+      <div id="editor-empty" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400 z-10 bg-gray-50">
+        <i data-lucide="edit-3" class="w-12 h-12 mb-4 opacity-20"></i>
+        <p>ファイルを選択すると編集画面が表示されます</p>
+      </div>
+
+      <!-- Editor Content (Scrollable) -->
+      <div id="editor-content" class="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-10 hidden bg-white z-0 relative min-h-0">
+        <div class="max-w-2xl mx-auto pb-10">
+          
+          <!-- Cover Art -->
+          <div class="mb-6 sm:mb-8">
+            <label class="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">カバーアート</label>
+            <div class="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
+              <div id="cover-container" class="w-40 h-40 sm:w-48 sm:h-48 bg-gray-100 border border-gray-200 rounded-lg shadow-sm flex flex-col items-center justify-center overflow-hidden relative group shrink-0 cursor-pointer hover:bg-gray-200 transition-colors">
+                <div id="cover-placeholder" class="flex flex-col items-center text-gray-400">
+                  <i data-lucide="image" class="w-8 h-8 mb-2"></i>
+                  <span id="cover-text" class="text-xs font-medium">アートワーク</span>
+                </div>
+                <img src="" alt="Cover" class="hidden w-full h-full object-cover transition-opacity" id="cover-image">
+                <div class="absolute inset-0 bg-black bg-opacity-40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <i data-lucide="camera" class="text-white w-6 h-6 mb-2"></i>
+                  <span class="text-white text-sm font-medium">変更</span>
+                </div>
+                <input type="file" id="cover-input" accept="image/*" class="hidden">
+              </div>
+              <div class="flex flex-col gap-3 pt-2 w-full text-center sm:text-left">
+                <h2 id="editor-title" class="text-lg font-bold text-gray-800 truncate">-</h2>
+                <div class="mt-1 text-sm text-gray-600 bg-blue-50 border border-blue-100 p-3 rounded-md text-left">
+                  <p><strong>ヒント:</strong></p>
+                  <ul class="list-disc pl-5 mt-1 space-y-1 text-xs">
+                    <li>画像エリアをクリックして変更できます。</li>
+                    <li>保存時に自動で圧縮・最適化されます。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Form Inputs -->
+          <div class="grid grid-cols-1 gap-4 sm:gap-5 pt-6 border-t border-gray-100">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">タイトル <span class="text-xs text-gray-400 ml-1">(<保持>の場合は元のデータから変更されません)</span></label>
+              <input type="text" data-key="title" class="tag-input w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">アーティスト</label>
+              <input type="text" data-key="artist" class="tag-input w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">アルバム</label>
+              <input type="text" data-key="album" class="tag-input w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">トラック番号</label>
+                <input type="text" data-key="track" class="tag-input w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">ディスク番号</label>
+                <input type="text" data-key="disk" class="tag-input w-full border-gray-300 border rounded-md px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- JavaScript -->
+  <script>
+    lucide.createIcons();
+
+    const state = {
+      files: [],       
+      selectedIds: new Set()
+    };
+
+    const dom = {
+      unsupportedScreen: document.getElementById('unsupported-screen'),
+      btnOpenFolder: document.getElementById('btn-open-folder'),
+      emptyState: document.getElementById('empty-state'),
+      fileListContainer: document.getElementById('file-list-container'),
+      listToolbar: document.getElementById('list-toolbar'),
+      folderNameDisplay: document.getElementById('folder-name-display'),
+      chkSelectAll: document.getElementById('chk-select-all'),
+      selectionStatus: document.getElementById('selection-status'),
+      statusText: document.getElementById('status-text'),
+      mobileEditBtn: document.getElementById('mobile-edit-btn'),
+      headerBackBtn: document.getElementById('header-back-btn'),
+      btnDiscard: document.getElementById('btn-discard'),
+      btnSave: document.getElementById('btn-save'),
+      editorEmpty: document.getElementById('editor-empty'),
+      editorContent: document.getElementById('editor-content'),
+      editorTitle: document.getElementById('editor-title'),
+      coverContainer: document.getElementById('cover-container'),
+      coverInput: document.getElementById('cover-input'),
+      coverImage: document.getElementById('cover-image'),
+      coverPlaceholder: document.getElementById('cover-placeholder'),
+      coverText: document.getElementById('cover-text'),
+      tagInputs: document.querySelectorAll('.tag-input'),
+      sidebarList: document.getElementById('sidebar-list'),
+      resizer: document.getElementById('resizer')
+    };
+
+    function init() {
+      if (!('showDirectoryPicker' in window)) {
+        dom.unsupportedScreen.classList.remove('hidden');
+        return; 
+      }
+      setupEventListeners();
+    }
+
+    // ====== Shift-JIS文字化け対策 ======
+    function fixEncoding(str) {
+      if (!str) return str;
+      const isLikelyMojibake = /[\u00C0-\u00FF]/.test(str);
+      if (!isLikelyMojibake) return str;
+
+      try {
+        const bytes = new Uint8Array(str.length);
+        for (let i = 0; i < str.length; i++) {
+          bytes[i] = str.charCodeAt(i) & 0xff;
+        }
+        const decoder = new TextDecoder('shift-jis', { fatal: true });
+        return decoder.decode(bytes);
+      } catch (e) {
+        return str; 
+      }
+    }
+
+    // ====== フォルダ読み込み処理 ======
+    async function handleOpenFolder() {
+      try {
+        const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+        const loadedFiles = [];
+        
+        dom.folderNameDisplay.textContent = dirHandle.name;
+        dom.listToolbar.classList.remove('hidden');
+
+        for await (const entry of dirHandle.values()) {
+          if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.mp3')) {
+            const file = await entry.getFile();
+            loadedFiles.push({
+              id: entry.name,
+              handle: entry,
+              file: file,
+              tags: { title: entry.name.replace(/\.mp3$/i, ''), artist: '', album: '', track: '', disk: '', cover: null },
+              originalTags: {}
+            });
+          }
+        }
+        
+        state.files = loadedFiles;
+        state.selectedIds = new Set();
+        renderList();
+        renderEditor();
+
+        await loadExistingTags();
+      } catch (error) {
+        console.error(error);
+        if (error.name !== 'AbortError') {
+          alert('フォルダの読み込みに失敗しました。');
+        }
+      }
+    }
+
+    // ====== 既存タグの非同期読み込み ======
+    async function loadExistingTags() {
+      if (typeof jsmediatags === 'undefined') return;
+
+      const promises = state.files.map(fileObj => {
+        return new Promise((resolve) => {
+          jsmediatags.read(fileObj.file, {
+            onSuccess: function(tag) {
+              const tags = tag.tags;
+              const newTags = { ...fileObj.tags };
+              
+              if (tags.title) newTags.title = fixEncoding(tags.title);
+              if (tags.artist) newTags.artist = fixEncoding(tags.artist);
+              if (tags.album) newTags.album = fixEncoding(tags.album);
+              if (tags.track) newTags.track = tags.track; 
+
+              if (tags.TPOS && tags.TPOS.data) {
+                newTags.disk = tags.TPOS.data;
+              }
+
+              if (tags.picture) {
+                let base64String = "";
+                for (let i = 0; i < tags.picture.data.length; i++) {
+                  base64String += String.fromCharCode(tags.picture.data[i]);
+                }
+                const base64 = btoa(base64String);
+                newTags.cover = `data:${tags.picture.format};base64,${base64}`;
+              }
+
+              fileObj.tags = newTags;
+              fileObj.originalTags = JSON.parse(JSON.stringify(newTags));
+              resolve();
             },
-            coverPreview: document.getElementById('cover-image-preview'),
-            coverPlaceholder: document.getElementById('cover-placeholder'),
-            coverPlaceholderText: document.getElementById('cover-placeholder-text'),
-            resizer: document.getElementById('resizer'),
-            sidebar: document.getElementById('sidebar-list')
-        };
-
-        // --- Phase 2-3: Unsupported Browser Check ---
-        document.addEventListener('DOMContentLoaded', () => {
-            if (!('showDirectoryPicker' in window)) {
-                document.body.innerHTML = `
-                    <div class="flex items-center justify-center h-screen bg-gray-50 p-4">
-                        <div class="text-center bg-white p-8 rounded-xl shadow-lg border border-red-200 max-w-md">
-                            <svg class="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                            <h1 class="text-2xl font-bold text-gray-800 mb-2">非対応のブラウザです</h1>
-                            <p class="text-gray-600 text-sm leading-relaxed">このアプリはローカルファイルを直接安全に編集するため、高度なファイルシステムAPIを使用しています。<br><br><strong>PC版の Google Chrome または Microsoft Edge</strong> でご利用ください。</p>
-                        </div>
-                    </div>
-                `;
-                return;
+            onError: function(error) {
+              fileObj.originalTags = JSON.parse(JSON.stringify(fileObj.tags));
+              resolve();
             }
+          });
         });
+      });
 
-        // --- Phase 2-1: Shift-JIS Encoding Fix ---
-        function fixEncoding(str) {
-            if (!str) return str;
-            let isIso88591 = true;
-            let hasHighBit = false;
-            for (let i = 0; i < str.length; i++) {
-                const code = str.charCodeAt(i);
-                if (code > 255) { isIso88591 = false; break; }
-                if (code > 127) { hasHighBit = true; }
+      await Promise.all(promises);
+      renderEditor();
+      renderList();
+    }
+
+    // ====== 保存処理 (ID3書き込み + ダウンロードフォールバック) ======
+    async function saveChanges() {
+      if (state.selectedIds.size === 0) return;
+
+      const originalText = dom.btnSave.innerHTML;
+      dom.btnSave.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> 保存中...';
+      lucide.createIcons();
+      dom.btnSave.disabled = true;
+
+      try {
+        let savedCount = 0;
+        let downloadedCount = 0;
+        
+        const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        for (const id of state.selectedIds) {
+          const target = state.files.find(f => f.id === id);
+          if (!target || !target.file) continue;
+
+          const arrayBuffer = await target.file.arrayBuffer();
+          const writer = new ID3Writer(arrayBuffer);
+          const t = target.tags;
+          
+          if (t.title) writer.setFrame('TIT2', t.title);
+          if (t.artist) writer.setFrame('TPE1', [t.artist]);
+          if (t.album) writer.setFrame('TALB', t.album);
+          if (t.track) writer.setFrame('TRCK', t.track);
+          if (t.disk) writer.setFrame('TPOS', t.disk);
+
+          if (t.cover) {
+              try {
+                  const response = await fetch(t.cover);
+                  const imageBuffer = await response.arrayBuffer();
+                  writer.setFrame('APIC', {
+                      type: 3,
+                      data: imageBuffer,
+                      description: 'Cover'
+                  });
+              } catch(imgErr) {
+                  console.warn('画像の取得に失敗しました:', imgErr);
+              }
+          }
+
+          writer.addTag();
+          const newBuffer = writer.arrayBuffer;
+          const newMp3Blob = new Blob([newBuffer], { type: 'audio/mpeg' });
+
+          if (!isMobileDevice && target.handle && target.handle.createWritable) {
+              try {
+                  const writable = await target.handle.createWritable();
+                  await writable.write(newMp3Blob);
+                  await writable.close();
+                  target.file = new File([newMp3Blob], target.id, { type: 'audio/mpeg' });
+                  savedCount++;
+              } catch (writeError) {
+                  downloadFile(newMp3Blob, target.id);
+                  downloadedCount++;
+              }
+          } else {
+              downloadFile(newMp3Blob, target.id);
+              downloadedCount++;
+          }
+        }
+
+        if (savedCount > 0 || downloadedCount > 0) {
+          // カスタムメッセージ（トースト）の表示
+          const msg = document.createElement('div');
+          msg.className = "fixed bottom-4 right-4 bg-gray-800 text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-4 transform transition-all duration-300 translate-y-10 opacity-0 z-50";
+          msg.innerHTML = `
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+              <div>
+                  <div class="font-bold text-sm">タグを保存しました</div>
+                  <div class="text-xs opacity-80 mt-1">上書き: ${savedCount}件 / ダウンロード: ${downloadedCount}件</div>
+              </div>
+          `;
+          document.body.appendChild(msg);
+          
+          // アニメーションで表示
+          requestAnimationFrame(() => {
+              msg.classList.remove('translate-y-10', 'opacity-0');
+          });
+          
+          // 3秒後に非表示にしてDOMから削除
+          setTimeout(() => {
+              msg.classList.add('translate-y-10', 'opacity-0');
+              setTimeout(() => msg.remove(), 300);
+          }, 3000);
+          
+          state.files = state.files.map(f => {
+            if (state.selectedIds.has(f.id)) {
+              return { ...f, originalTags: JSON.parse(JSON.stringify(f.tags)) };
             }
-            if (isIso88591 && hasHighBit) {
-                try {
-                    const bytes = new Uint8Array(str.length);
-                    for (let i = 0; i < str.length; i++) { bytes[i] = str.charCodeAt(i); }
-                    const decoder = new TextDecoder('shift-jis');
-                    const decoded = decoder.decode(bytes);
-                    if (!decoded.includes('')) return decoded;
-                } catch (e) { /* fallback */ }
-            }
-            return str;
+            return f;
+          });
+          renderList(); 
         }
+      } catch (error) {
+        console.error(error);
+        alert('保存中に重大なエラーが発生しました。\n詳細: ' + error.message);
+      } finally {
+        dom.btnSave.innerHTML = originalText;
+        dom.btnSave.disabled = false;
+        lucide.createIcons();
+      }
+    }
 
-        function showToast(message, isError = false) {
-            const toast = document.createElement('div');
-            toast.className = `fixed bottom-4 right-4 text-white px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 transform transition-all duration-300 translate-y-10 opacity-0 z-50 ${isError ? 'bg-red-600' : 'bg-gray-800'}`;
-            toast.innerHTML = isError ? 
-                `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg> <span>${message}</span>` :
-                `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg> <span>${message}</span>`;
-            document.body.appendChild(toast);
-            
-            // Animate in
-            requestAnimationFrame(() => {
-                toast.classList.remove('translate-y-10', 'opacity-0');
-            });
-            // Animate out
-            setTimeout(() => {
-                toast.classList.add('translate-y-10', 'opacity-0');
-                setTimeout(() => toast.remove(), 300);
-            }, 4000);
-        }
+    function downloadFile(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
 
-        async function handleOpenFolder() {
-            try {
-                const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-                state.folderName = dirHandle.name;
-                els.folderNameDisplay.innerText = state.folderName + " (すべて選択)";
-                
-                const loadedFiles = [];
-                for await (const entry of dirHandle.values()) {
-                    if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.mp3')) {
-                        const file = await entry.getFile();
-                        loadedFiles.push({
-                            id: entry.name,
-                            handle: entry,
-                            file: file,
-                            originalTags: { title: entry.name.replace('.mp3', ''), artist: '', album: '', track: '', trackTotal: '', disk: '', diskTotal: '', cover: null },
-                            currentTags: {},
-                            isDirty: false
-                        });
-                    }
-                }
-                
-                state.files = loadedFiles;
-                state.selectedIds.clear();
-                renderList();
-                updateSelectionState();
-                
-                // Parse tags in background
-                if (window.jsmediatags) {
-                    showToast(`${loadedFiles.length}個のファイルを読み込んでいます...`);
-                    const parsePromises = state.files.map(f => new Promise(resolve => {
-                        window.jsmediatags.read(f.file, {
-                            onSuccess: (tag) => {
-                                const t = tag.tags;
-                                let coverUrl = null;
-                                if (t.picture) {
-                                    const { data, format } = t.picture;
-                                    const base64String = data.reduce((acc, byte) => acc + String.fromCharCode(byte), '');
-                                    coverUrl = `data:${format};base64,${btoa(base64String)}`;
-                                }
-                                
-                                // Split track/disk strings (e.g. "1/12")
-                                const trackParts = t.track ? String(t.track).split('/') : [];
-                                const diskParts = t.disk ? String(t.disk).split('/') : [];
-
-                                f.originalTags = {
-                                    title: fixEncoding(t.title) || f.id.replace('.mp3', ''),
-                                    artist: fixEncoding(t.artist) || '',
-                                    album: fixEncoding(t.album) || '',
-                                    track: trackParts[0] || '',
-                                    trackTotal: trackParts[1] || '',
-                                    disk: diskParts[0] || '',
-                                    diskTotal: diskParts[1] || '',
-                                    cover: coverUrl
-                                };
-                                f.currentTags = { ...f.originalTags };
-                                resolve();
-                            },
-                            onError: () => resolve() // Ignore parse errors, keep default tags
-                        });
-                    }));
-                    await Promise.all(parsePromises);
-                    renderEditor(); // Re-render editor with parsed data if selected
-                } else {
-                    state.files.forEach(f => f.currentTags = { ...f.originalTags });
-                }
-
-            } catch (err) {
-                if (err.name !== 'AbortError') showToast('フォルダの読み込みに失敗しました。', true);
-            }
-        }
-
-        function getCommonValue(key) {
-            if (state.selectedIds.size === 0) return '';
-            const selected = state.files.filter(f => state.selectedIds.has(f.id));
-            const firstVal = selected[0].currentTags[key];
-            return selected.every(f => f.currentTags[key] === firstVal) ? firstVal : '';
-        }
-
-        function getPlaceholder(key) {
-            if (state.selectedIds.size === 0) return '';
-            const selected = state.files.filter(f => state.selectedIds.has(f.id));
-            const firstVal = selected[0].currentTags[key];
-            return selected.every(f => f.currentTags[key] === firstVal) ? '' : '<保持>';
-        }
-
-        function handleTagChange(key, value) {
-            state.files.forEach(f => {
-                if (state.selectedIds.has(f.id)) {
-                    f.currentTags[key] = value;
-                    f.isDirty = true;
-                }
-            });
-            updateSelectionState();
-            renderList(); // Update asterisks
-        }
-
-        // --- Phase 2-2: Canvas Image Resizing & Compression ---
-        function handleImageChange(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
+    function resizeAndCompressImage(file) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
             const MAX_SIZE = 800;
-            const reader = new FileReader();
-            
-            reader.onload = function(e) {
-                const img = new Image();
-                img.onload = function() {
-                    let width = img.width;
-                    let height = img.height;
+            let width = img.width;
+            let height = img.height;
 
-                    if (width > MAX_SIZE || height > MAX_SIZE) {
-                        if (width > height) {
-                            height = Math.round(height * (MAX_SIZE / width));
-                            width = MAX_SIZE;
-                        } else {
-                            width = Math.round(width * (MAX_SIZE / height));
-                            height = MAX_SIZE;
-                        }
-                    }
-
-                    const canvas = document.createElement('canvas');
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-
-                    const dataUrl = canvas.toDataURL('image/jpeg', 0.85); // Compress
-                    handleTagChange('cover', dataUrl);
-                    renderEditor();
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-            event.target.value = ''; // Reset input
-        }
-
-        function clearCoverImage() {
-            handleTagChange('cover', null);
-            renderEditor();
-        }
-
-        function discardChanges() {
-            state.files.forEach(f => {
-                if (state.selectedIds.has(f.id)) {
-                    f.currentTags = { ...f.originalTags };
-                    f.isDirty = false;
-                }
-            });
-            renderEditor();
-            renderList();
-            updateSelectionState();
-            showToast('編集内容を破棄しました');
-        }
-
-        function renderList() {
-            els.fileList.innerHTML = '';
-            if (state.files.length === 0) {
-                els.fileList.innerHTML = `
-                    <div class="h-full flex flex-col items-center justify-center text-gray-400 p-4 text-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-4 opacity-50"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-                        <p class="text-sm">右上の「フォルダを開く」から<br>MP3ファイルを読み込んでください</p>
-                    </div>`;
-                return;
+            if (width > MAX_SIZE || height > MAX_SIZE) {
+              if (width > height) {
+                height = Math.round((height *= MAX_SIZE / width));
+                width = MAX_SIZE;
+              } else {
+                width = Math.round((width *= MAX_SIZE / height));
+                height = MAX_SIZE;
+              }
             }
 
-            state.files.forEach(f => {
-                const isSelected = state.selectedIds.has(f.id);
-                const titleDisplay = f.currentTags.title || f.id;
-                const artistDisplay = f.currentTags.artist || 'Unknown Artist';
-                
-                const div = document.createElement('div');
-                div.className = `p-3 border rounded-md cursor-pointer transition-colors hover:bg-gray-50 flex items-center gap-3 ${isSelected ? 'selected-file' : 'bg-white border-gray-200'}`;
-                div.onclick = (e) => handleItemClick(e, f.id);
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
 
-                div.innerHTML = `
-                    <div class="flex items-center justify-center pl-1" onclick="event.stopPropagation()">
-                        <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelection('${f.id}')" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded cursor-pointer">
-                    </div>
-                    <div class="w-10 h-10 bg-gray-200 rounded object-cover flex-shrink-0 flex items-center justify-center text-gray-400 overflow-hidden">
-                        ${f.currentTags.cover ? `<img src="${f.currentTags.cover}" class="w-full h-full object-cover">` : `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>`}
-                    </div>
-                    <div class="overflow-hidden flex-1">
-                        <div class="font-medium text-sm truncate ${isSelected ? 'text-blue-900' : 'text-gray-800'}">${titleDisplay} ${f.isDirty ? '<span class="text-blue-500 font-bold">*</span>' : ''}</div>
-                        <div class="text-xs ${isSelected ? 'text-blue-600' : 'text-gray-500'} truncate">${artistDisplay}</div>
-                    </div>
-                `;
-                els.fileList.appendChild(div);
-            });
+    // ====== 選択・操作ロジック ======
+    function toggleSelection(id) {
+      if (state.selectedIds.has(id)) {
+        state.selectedIds.delete(id);
+      } else {
+        state.selectedIds.add(id);
+      }
+      renderList();
+      renderEditor();
+    }
+
+    function handleRowClick(e, id) {
+      const isCheckboxClick = e.target.tagName.toLowerCase() === 'input' && e.target.type === 'checkbox';
+      if (isCheckboxClick || window.innerWidth < 768) {
+        toggleSelection(id);
+      } else {
+        if (e.ctrlKey || e.metaKey) {
+          toggleSelection(id);
+        } else {
+          state.selectedIds = new Set([id]);
+          renderList();
+          renderEditor();
         }
+      }
+    }
 
-        function renderEditor() {
-            if (state.selectedIds.size === 0) {
-                els.editorContent.classList.add('opacity-50', 'pointer-events-none');
-                els.editorHeaderTitle.innerText = 'ファイルを選択してください';
-                ['title', 'artist', 'album', 'track', 'trackTotal', 'disk', 'diskTotal'].forEach(k => els.inputs[k].value = '');
-                els.coverPreview.classList.add('hidden');
-                els.coverPlaceholder.classList.remove('hidden');
-                return;
-            }
+    function isFileModified(fileObj) {
+      const current = fileObj.tags;
+      const orig = fileObj.originalTags;
+      if (!orig) return false;
+      return current.title !== orig.title ||
+             current.artist !== orig.artist ||
+             current.album !== orig.album ||
+             current.track !== orig.track ||
+             current.disk !== orig.disk ||
+             current.cover !== orig.cover;
+    }
 
-            els.editorContent.classList.remove('opacity-50', 'pointer-events-none');
-            
-            if (state.selectedIds.size === 1) {
-                els.editorHeaderTitle.innerText = Array.from(state.selectedIds)[0];
-            } else {
-                els.editorHeaderTitle.innerText = `${state.selectedIds.size} 件のファイルを一括編集`;
-            }
-
-            const keys = ['title', 'artist', 'album', 'track', 'trackTotal', 'disk', 'diskTotal'];
-            keys.forEach(k => {
-                els.inputs[k].value = getCommonValue(k);
-                els.inputs[k].placeholder = getPlaceholder(k);
-            });
-
-            const commonCover = getCommonValue('cover');
-            if (commonCover) {
-                els.coverPreview.src = commonCover;
-                els.coverPreview.classList.remove('hidden');
-                els.coverPlaceholder.classList.add('hidden');
-            } else {
-                els.coverPreview.classList.add('hidden');
-                els.coverPlaceholder.classList.remove('hidden');
-                els.coverPlaceholderText.innerText = getPlaceholder('cover') ? '画像が異なります' : '画像を設定';
-            }
+    function handleTagChange(key, value) {
+      state.files.forEach(f => {
+        if (state.selectedIds.has(f.id)) {
+          f.tags[key] = value;
         }
+      });
+      renderList(); 
+    }
 
-        function toggleSelection(id) {
-            if (state.selectedIds.has(id)) {
-                state.selectedIds.delete(id);
-            } else {
-                state.selectedIds.add(id);
-            }
-            updateSelectionState();
-            renderList();
-            renderEditor();
-        }
+    async function handleImageUpload(e) {
+      const file = e.target.files[0];
+      if (file) {
+        const compressedDataUrl = await resizeAndCompressImage(file);
+        handleTagChange('cover', compressedDataUrl);
+        renderEditor();
+      }
+      e.target.value = ''; 
+    }
 
-        function handleItemClick(e, id) {
-            const isCheckbox = e.target.tagName === 'INPUT' && e.target.type === 'checkbox';
-            if (!isCheckbox) {
-                if (e.ctrlKey || e.metaKey) {
-                    toggleSelection(id);
-                    return; // toggleSelection handles renders
-                } else {
-                    state.selectedIds.clear();
-                    state.selectedIds.add(id);
-                }
-            }
-            updateSelectionState();
-            renderList();
-            renderEditor();
-        }
+    function handleDiscard() {
+      if (confirm('選択中のファイルの編集内容を破棄して元の状態に戻しますか？')) {
+        state.files.forEach(f => {
+          if (state.selectedIds.has(f.id) && f.originalTags) {
+            f.tags = JSON.parse(JSON.stringify(f.originalTags));
+          }
+        });
+        renderList();
+        renderEditor();
+      }
+    }
 
-        function toggleSelectAll(checkbox) {
-            if (checkbox.checked) {
-                state.files.forEach(f => state.selectedIds.add(f.id));
-            } else {
-                state.selectedIds.clear();
-            }
-            updateSelectionState();
-            renderList();
-            renderEditor();
-        }
+    function getCommonValue(key) {
+      if (state.selectedIds.size === 0) return '';
+      const selected = state.files.filter(f => state.selectedIds.has(f.id));
+      const firstVal = selected[0].tags[key];
+      const isAllSame = selected.every(f => f.tags[key] === firstVal);
+      return isAllSame ? firstVal : '';
+    }
 
-        function updateSelectionState() {
-            const count = state.selectedIds.size;
-            
-            // Checkbox sync
-            els.chkSelectAll.checked = count > 0 && count === state.files.length;
-            els.chkSelectAll.indeterminate = count > 0 && count < state.files.length;
+    function getPlaceholder(key) {
+      if (state.selectedIds.size === 0) return '';
+      const selected = state.files.filter(f => state.selectedIds.has(f.id));
+      const firstVal = selected[0].tags[key];
+      const isAllSame = selected.every(f => f.tags[key] === firstVal);
+      return isAllSame ? '' : '<保持>';
+    }
 
-            // Buttons state
-            const hasDirty = state.files.some(f => state.selectedIds.has(f.id) && f.isDirty);
-            els.btnSave.disabled = !hasDirty || count === 0;
-            els.btnDiscard.disabled = !hasDirty || count === 0;
+    // ====== 画面更新 (レンダリング) ======
+    function renderList() {
+      if (state.files.length === 0) {
+        dom.emptyState.classList.remove('hidden');
+      } else {
+        dom.emptyState.classList.add('hidden');
+        dom.chkSelectAll.checked = state.selectedIds.size === state.files.length;
 
-            // Mobile status
-            if (count > 0) {
-                els.statusText.parentElement.classList.replace('bg-gray-50', 'bg-blue-50');
-                els.statusText.parentElement.classList.replace('text-gray-500', 'text-blue-800');
-                els.statusText.innerText = `${count} 個のファイルを選択中`;
-                
-                els.mobileEditBtn.disabled = false;
-                els.mobileEditBtn.classList.replace('bg-gray-400', 'bg-blue-600');
-                els.mobileEditBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-            } else {
-                els.statusText.parentElement.classList.replace('bg-blue-50', 'bg-gray-50');
-                els.statusText.parentElement.classList.replace('text-blue-800', 'text-gray-500');
-                els.statusText.innerText = "ファイルが選択されていません";
-                
-                els.mobileEditBtn.disabled = true;
-                els.mobileEditBtn.classList.replace('bg-blue-600', 'bg-gray-400');
-                els.mobileEditBtn.classList.add('opacity-50', 'cursor-not-allowed');
-            }
-        }
+        // Remove old list items, keep empty state
+        const items = dom.fileListContainer.querySelectorAll('.file-list-item');
+        items.forEach(item => item.remove());
 
-        function switchMobileView(view) {
-            document.body.classList.remove('mobile-view-list', 'mobile-view-editor');
-            document.body.classList.add(`mobile-view-${view}`);
-            if (view === 'editor') window.scrollTo(0, 0);
-        }
+        state.files.forEach(f => {
+          const isSelected = state.selectedIds.has(f.id);
+          const isModified = isFileModified(f);
+          
+          const div = document.createElement('div');
+          // クラス名を 'list-item' から 'file-list-item' に変更し、Tailwindとの衝突を回避します
+          div.className = `file-list-item p-3 border rounded-md mb-2 cursor-pointer transition-colors flex items-center gap-3 ${isSelected ? 'selected-file' : 'bg-white hover:bg-gray-50'}`;
+          
+          div.innerHTML = `
+            <div class="flex-shrink-0 flex items-center justify-center pl-1">
+                <input type="checkbox" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded cursor-pointer" ${isSelected ? 'checked' : ''}>
+            </div>
+            <div class="w-10 h-10 bg-gray-200 border border-gray-200 rounded flex-shrink-0 flex items-center justify-center text-gray-400 overflow-hidden">
+                ${f.tags.cover ? `<img src="${f.tags.cover}" class="w-full h-full object-cover">` : `<i data-lucide="music" class="w-5 h-5"></i>`}
+            </div>
+            <div class="flex-1 min-w-0 overflow-hidden">
+                <div class="font-medium text-sm truncate ${isModified ? 'text-blue-600 font-bold' : 'text-gray-800'}">${f.id} ${isModified ? '*' : ''}</div>
+                <div class="text-xs text-gray-500 truncate">${f.tags.artist || 'Unknown Artist'}</div>
+            </div>
+          `;
+          div.onclick = (e) => handleRowClick(e, f.id);
+          dom.fileListContainer.appendChild(div);
+        });
+      }
 
-        // --- Resizer Logic ---
-        let isResizing = false;
-        els.resizer.addEventListener('mousedown', (e) => {
-            isResizing = true;
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
+      // Update Status Bar
+      const selectedCount = state.selectedIds.size;
+      dom.statusText.textContent = `${selectedCount} / ${state.files.length} 個のファイルを選択中`;
+      
+      if (selectedCount > 0) {
+        dom.selectionStatus.classList.remove('bg-gray-50', 'text-gray-500');
+        dom.selectionStatus.classList.add('bg-blue-50', 'text-blue-800');
+        dom.mobileEditBtn.disabled = false;
+        dom.mobileEditBtn.className = 'md:hidden w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg font-medium text-base shadow-sm flex items-center justify-center gap-2 transition-colors';
+        dom.mobileEditBtn.innerHTML = '<i data-lucide="edit-2" class="w-5 h-5"></i> 選択項目を編集する';
+      } else {
+        dom.selectionStatus.classList.add('bg-gray-50', 'text-gray-500');
+        dom.selectionStatus.classList.remove('bg-blue-50', 'text-blue-800');
+        dom.mobileEditBtn.disabled = true;
+        dom.mobileEditBtn.className = 'md:hidden w-full bg-gray-400 text-white px-4 py-3 rounded-lg font-medium text-base shadow-sm flex items-center justify-center gap-2 transition-colors opacity-50 cursor-not-allowed';
+        dom.mobileEditBtn.innerHTML = '選択項目を編集する';
+      }
+      
+      lucide.createIcons();
+    }
+
+    function renderEditor() {
+      const selectedCount = state.selectedIds.size;
+      
+      dom.btnDiscard.disabled = selectedCount === 0;
+      dom.btnSave.disabled = selectedCount === 0;
+
+      if (selectedCount === 0) {
+        dom.editorEmpty.classList.remove('hidden');
+        dom.editorContent.classList.add('hidden');
+      } else {
+        dom.editorEmpty.classList.add('hidden');
+        dom.editorContent.classList.remove('hidden');
+
+        dom.editorTitle.textContent = selectedCount === 1 ? Array.from(state.selectedIds)[0] : `${selectedCount} 個のファイルを編集`;
+
+        dom.tagInputs.forEach(input => {
+          const key = input.dataset.key;
+          input.value = getCommonValue(key);
+          input.placeholder = getPlaceholder(key);
         });
 
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
-            const minWidth = 240;
-            const maxWidth = window.innerWidth * 0.6;
-            let newWidth = e.clientX;
-            if (newWidth < minWidth) newWidth = minWidth;
-            if (newWidth > maxWidth) newWidth = maxWidth;
-            els.sidebar.classList.remove('md:w-1/4');
-            els.sidebar.style.width = `${newWidth}px`;
-        });
-
-        document.addEventListener('mouseup', () => {
-            if (isResizing) {
-                isResizing = false;
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-            }
-        });
-
-        async function saveChanges() {
-            if (typeof ID3Writer === 'undefined') {
-                showToast('ライブラリの読み込みに失敗しています。再読み込みしてください。', true);
-                return;
-            }
-
-            const targetFiles = state.files.filter(f => state.selectedIds.has(f.id) && f.isDirty);
-            if (targetFiles.length === 0) return;
-
-            const overlay = document.getElementById('loading-overlay');
-            const overlayText = document.getElementById('loading-text');
-            overlay.classList.remove('hidden');
-
-            try {
-                let savedCount = 0;
-                for (let i = 0; i < targetFiles.length; i++) {
-                    const f = targetFiles[i];
-                    overlayText.innerText = `保存中... (${i + 1} / ${targetFiles.length})`;
-                    
-                    const fileData = await f.file.arrayBuffer();
-                    const writer = new ID3Writer(fileData);
-                    const t = f.currentTags;
-
-                    if (t.title) writer.setFrame('TIT2', t.title);
-                    if (t.artist) writer.setFrame('TPE1', [t.artist]);
-                    if (t.album) writer.setFrame('TALB', t.album);
-                    
-                    let trackStr = t.track || '';
-                    if (trackStr && t.trackTotal) trackStr += '/' + t.trackTotal;
-                    if (trackStr) writer.setFrame('TRCK', trackStr);
-
-                    let diskStr = t.disk || '';
-                    if (diskStr && t.diskTotal) diskStr += '/' + t.diskTotal;
-                    if (diskStr) writer.setFrame('TPOS', diskStr);
-
-                    if (t.cover) {
-                        try {
-                            const res = await fetch(t.cover);
-                            const coverBuffer = await res.arrayBuffer();
-                            writer.setFrame('APIC', {
-                                type: 3,
-                                data: coverBuffer,
-                                description: 'Cover'
-                            });
-                        } catch(e) { console.warn("Failed to attach cover image", e); }
-                    }
-
-                    writer.addTag();
-                    const newBuffer = writer.arrayBuffer;
-
-                    const writable = await f.handle.createWritable();
-                    await writable.write(newBuffer);
-                    await writable.close();
-
-                    // Update internal state to match newly saved data
-                    f.originalTags = { ...f.currentTags };
-                    f.isDirty = false;
-                    // refresh file object reference
-                    f.file = await f.handle.getFile(); 
-                    savedCount++;
-                }
-
-                showToast(`${savedCount}個のファイルを上書き保存しました。`);
-                renderList();
-                updateSelectionState();
-
-            } catch (err) {
-                console.error(err);
-                showToast('保存中にエラーが発生しました。権限を確認してください。', true);
-            } finally {
-                overlay.classList.add('hidden');
-            }
+        const coverVal = getCommonValue('cover');
+        const coverPlaceholder = getPlaceholder('cover');
+        
+        if (coverVal) {
+          dom.coverImage.src = coverVal;
+          dom.coverImage.classList.remove('hidden');
+          dom.coverPlaceholder.classList.add('hidden');
+        } else {
+          dom.coverImage.classList.add('hidden');
+          dom.coverPlaceholder.classList.remove('hidden');
+          dom.coverText.textContent = coverPlaceholder === '<保持>' ? '画像が異なります' : 'アートワーク';
         }
-    </script>
+      }
+    }
+
+    function setupEventListeners() {
+      dom.btnOpenFolder.addEventListener('click', handleOpenFolder);
+      
+      dom.chkSelectAll.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          state.selectedIds = new Set(state.files.map(f => f.id));
+        } else {
+          state.selectedIds = new Set();
+        }
+        renderList();
+        renderEditor();
+      });
+
+      dom.tagInputs.forEach(input => {
+        input.addEventListener('input', (e) => {
+          handleTagChange(e.target.dataset.key, e.target.value);
+        });
+      });
+
+      dom.coverContainer.addEventListener('click', () => dom.coverInput.click());
+      dom.coverInput.addEventListener('change', handleImageUpload);
+      
+      dom.btnDiscard.addEventListener('click', handleDiscard);
+      dom.btnSave.addEventListener('click', saveChanges);
+
+      // スマホ画面切り替え
+      dom.mobileEditBtn.addEventListener('click', () => {
+        document.body.classList.remove('mobile-view-list');
+        document.body.classList.add('mobile-view-editor');
+      });
+      dom.headerBackBtn.addEventListener('click', () => {
+        document.body.classList.remove('mobile-view-editor');
+        document.body.classList.add('mobile-view-list');
+      });
+
+      // PC用リサイザー
+      let isResizing = false;
+      dom.resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        document.body.style.cursor = 'col-resize';
+      });
+      document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        let newWidth = e.clientX;
+        const minWidth = 250;
+        const maxWidth = window.innerWidth * 0.6;
+        if (newWidth < minWidth) newWidth = minWidth;
+        if (newWidth > maxWidth) newWidth = maxWidth;
+        dom.sidebarList.classList.remove('md:w-1/4');
+        dom.sidebarList.style.width = `${newWidth}px`;
+      });
+      document.addEventListener('mouseup', () => {
+        if (isResizing) {
+          isResizing = false;
+          document.body.style.cursor = '';
+        }
+      });
+    }
+
+    init();
+  </script>
 </body>
 </html>
